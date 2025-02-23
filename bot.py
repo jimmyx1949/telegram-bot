@@ -2,6 +2,7 @@ import random
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, InlineQueryResultArticle, InputTextMessageContent, InputMediaPhoto
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler, InlineQueryHandler, ChosenInlineResultHandler
 from datetime import datetime
+from decouple import config
 
 # 模拟用户余额存储
 user_balances = {}
@@ -29,7 +30,7 @@ async def get_home_message(update: Update):
         f"💰 TRX: {balances['trx']}"
     )
 
-# 发送主页消息（带图片）
+# 发送主页消息（移除“固定菜单已启用”消息）
 async def send_home_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     home_text = await get_home_message(update)
     inline_keyboard = [
@@ -55,21 +56,17 @@ async def send_home_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     caption=home_text,
                     reply_markup=inline_reply_markup
                 )
-                await update.message.reply_text("固定菜单已启用", reply_markup=reply_markup)
             elif update.callback_query:
                 await update.callback_query.message.reply_photo(
                     photo=photo,
                     caption=home_text,
                     reply_markup=inline_reply_markup
                 )
-                await update.callback_query.message.reply_text("固定菜单已启用", reply_markup=reply_markup)
     except FileNotFoundError:
         if update.message:
             await update.message.reply_text(home_text + "\n❌ 图片 3.jpg 未找到！", reply_markup=inline_reply_markup)
-            await update.message.reply_text("固定菜单已启用", reply_markup=reply_markup)
         elif update.callback_query:
             await update.callback_query.message.reply_text(home_text + "\n❌ 图片 3.jpg 未找到！", reply_markup=inline_reply_markup)
-            await update.callback_query.message.reply_text("固定菜单已启用", reply_markup=reply_markup)
 
 # /start 命令
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -267,7 +264,7 @@ async def handle_hongbao_receive(update: Update, context: ContextTypes.DEFAULT_T
                     reply_markup=reply_markup
                 )
             else:
-                keyboard = [[InlineKeyboardButton("点击查看", url="https://t.me/DangoupayBot")]]
+                keyboard = [[InlineKeyboardButton("点击查看", url="https://t.me/qianbaoo_bot")]]
                 reply_markup = InlineKeyboardMarkup(keyboard)
                 await context.bot.edit_message_media(
                     inline_message_id=hongbao["inline_message_id"],
@@ -340,10 +337,10 @@ async def handle_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
             with open("666.ogg", "rb") as voice:
                 if update.callback_query:
                     await context.bot.send_voice(chat_id=query.message.chat_id, voice=voice)
-                    await context.bot.send_message(chat_id=query.message.chat_id, text="💰 余额 +100 USDT")
+                    await context.bot.send_message(chat_id=query.message.chat_id, text="余额 +100 USDT")
                 elif update.message:
                     await context.bot.send_voice(chat_id=message.chat_id, voice=voice)
-                    await context.bot.send_message(chat_id=message.chat_id, text="💰 余额 +100 USDT")
+                    await context.bot.send_message(chat_id=message.chat_id, text="余额 +100 USDT")
         except FileNotFoundError:
             if update.callback_query:
                 await context.bot.send_message(chat_id=query.message.chat_id, text="❌ 语音文件 666.ogg 未找到！")
@@ -358,10 +355,10 @@ async def handle_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
             with open("111.ogg", "rb") as voice:
                 if update.callback_query:
                     await context.bot.send_voice(chat_id=query.message.chat_id, voice=voice)
-                    await context.bot.send_message(chat_id=query.message.chat_id, text="💰 余额 +100 USDT")
+                    await context.bot.send_message(chat_id=query.message.chat_id, text="余额 +100 USDT")
                 elif update.message:
                     await context.bot.send_voice(chat_id=message.chat_id, voice=voice)
-                    await context.bot.send_message(chat_id=message.chat_id, text="💰 余额 +100 USDT")
+                    await context.bot.send_message(chat_id=message.chat_id, text="余额 +100 USDT")
         except FileNotFoundError:
             if update.callback_query:
                 await context.bot.send_message(chat_id=query.message.chat_id, text="❌ 语音文件 111.ogg 未找到！")
@@ -376,10 +373,10 @@ async def handle_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
             with open("222.ogg", "rb") as voice:
                 if update.callback_query:
                     await context.bot.send_voice(chat_id=query.message.chat_id, voice=voice)
-                    await context.bot.send_message(chat_id=query.message.chat_id, text="💰 余额 +100 USDT")
+                    await context.bot.send_message(chat_id=query.message.chat_id, text="余额 +100 USDT")
                 elif update.message:
                     await context.bot.send_voice(chat_id=message.chat_id, voice=voice)
-                    await context.bot.send_message(chat_id=message.chat_id, text="💰 余额 +100 USDT")
+                    await context.bot.send_message(chat_id=message.chat_id, text="余额 +100 USDT")
         except FileNotFoundError:
             if update.callback_query:
                 await context.bot.send_message(chat_id=query.message.chat_id, text="❌ 语音文件 222.ogg 未找到！")
@@ -403,7 +400,7 @@ async def handle_any_message(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 # 主程序
 def main():
-    TOKEN = "7907959876:AAEEsL9D4-omSLxwiUPOPYhDDfcXOF91wuw"
+    TOKEN = config("BOT_TOKEN")
     application = Application.builder().token(TOKEN).build()
 
     application.add_handler(CommandHandler("start", start))
