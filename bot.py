@@ -1,8 +1,11 @@
 import random
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, InlineQueryResultArticle, InputTextMessageContent, InputMediaPhoto
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, InlineQueryResultArticle, InputTextMessageContent
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler, InlineQueryHandler, ChosenInlineResultHandler
 from datetime import datetime
 from decouple import config
+import threading
+import http.server
+import socketserver
 
 # 模拟用户余额存储
 user_balances = {}
@@ -30,7 +33,7 @@ async def get_home_message(update: Update):
         f"💰 TRX: {balances['trx']}"
     )
 
-# 发送主页消息（移除“固定菜单已启用”消息）
+# 发送主页消息
 async def send_home_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     home_text = await get_home_message(update)
     inline_keyboard = [
@@ -105,7 +108,6 @@ async def handle_redpacket_amount(update: Update, context: ContextTypes.DEFAULT_
         if user_balances.get(user_id, {}).get("usdt", 0) < amount:
             await update.message.reply_text("❌ USDT 余额不足，无法发送红包！")
             return
-        # 生成支付按钮
         keyboard = [[InlineKeyboardButton("支付", callback_data=f"pay_{amount}")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         await update.message.reply_text(f"您输入的红包金额为 {amount} USDT，点击支付确认：", reply_markup=reply_markup)
@@ -120,11 +122,9 @@ async def handle_redpacket_payment(update: Update, context: ContextTypes.DEFAULT
     user_id = update.effective_user.id
     nickname = update.effective_user.full_name
 
-    # 扣除余额
     balances = user_balances.setdefault(user_id, {"usdt": 0, "cny": 0, "trx": 0})
     balances["usdt"] -= amount
 
-    # 生成红包ID
     hongbao_id = str(random.randint(10000, 99999))
     hongbaos[hongbao_id] = {
         "sender_id": user_id,
@@ -136,10 +136,7 @@ async def handle_redpacket_payment(update: Update, context: ContextTypes.DEFAULT
         "inline_message_id": None
     }
 
-    # 生成发送红包按钮
-    keyboard = [
-        [InlineKeyboardButton("发送红包", switch_inline_query=f"hongbao {hongbao_id}")]
-    ]
+    keyboard = [[InlineKeyboardButton("发送红包", switch_inline_query=f"hongbao {hongbao_id}")]]
     reply_markup = InlineKeyboardMarkup(keyboard)
     await query.edit_message_text(
         text="✅ 红包创建成功！点击下方按钮选择群组发送红包：",
@@ -176,23 +173,7 @@ async def chosen_inline_result(update: Update, context: ContextTypes.DEFAULT_TYP
     result = update.chosen_inline_result
     hongbao_id = result.result_id
     if hongbao_id in hongbaos:
-        hongbao = hongbaos[hongbao_id]
-        hongbao["inline_message_id"] = result.inline_message_id
-        # 初次编辑为带图片的消息
-        message_text = f"{hongbao['sender_name']} 发送了一个红包\n🧧 {hongbao['sender_name']} 发送了一个红包\n💵总金额: {hongbao['total_amount']} USDT💰 剩余: 10/10"
-        keyboard = [[InlineKeyboardButton("领取红包", callback_data=f"receive_{hongbao_id}")]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        try:
-            with open("2.jpg", "rb") as photo:
-                await context.bot.edit_message_media(
-                    inline_message_id=hongbao["inline_message_id"],
-                    media=InputMediaPhoto(media=photo, caption=message_text),
-                    reply_markup=reply_markup
-                )
-        except FileNotFoundError:
-            await context.bot.send_message(chat_id=result.from_user.id, text="❌ 图片 2.jpg 未找到，请确保文件存在！")
-        except Exception as e:
-            await context.bot.send_message(chat_id=result.from_user.id, text=f"初次消息编辑失败：{str(e)}")
+        hongbaos[hongbao_id]["inline_message_id"] = result.inline_message_id
 
 # 处理红包领取
 async def handle_hongbao_receive(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -203,7 +184,7 @@ async def handle_hongbao_receive(update: Update, context: ContextTypes.DEFAULT_T
     user_name = update.effective_user.full_name
 
     if hongbao_id not in hongbaos:
-        await query.edit_message_caption("❌ 红包已过期或不存在！")
+        await query.edit_message_text("❌ 红包已过期或不存在！")
         return
 
     hongbao = hongbaos[hongbao_id]
@@ -211,21 +192,18 @@ async def handle_hongbao_receive(update: Update, context: ContextTypes.DEFAULT_T
         await context.bot.send_message(chat_id=query.message.chat_id, text="红包消息未正确初始化，请重试！")
         return
 
-    # 检查是否已领取
     if user_id in [r["user_id"] for r in hongbao["receivers"]]:
-        received_amount = next(r["amount"] for r in hongbao["receivers"] if r["user_id"] == user_id)
+        received_amount = next(r["amount"] for r in hongbaos["receivers"] if r["user_id"] == user_id)
         await context.bot.send_message(
             chat_id=query.message.chat_id,
             text=f"您已经领取过 {received_amount} USDT了！"
         )
         return
 
-    # 检查红包是否领完
     if hongbao["remaining_count"] <= 0:
         await context.bot.send_message(chat_id=query.message.chat_id, text="红包已被领完！")
         return
 
-    # 随机分配金额
     remaining_amount = hongbao["remaining_amount"]
     amount = round(random.uniform(0.01, remaining_amount / hongbao["remaining_count"]), 2)
     hongbao["remaining_amount"] -= amount
@@ -237,11 +215,9 @@ async def handle_hongbao_receive(update: Update, context: ContextTypes.DEFAULT_T
         "time": datetime.now().strftime("%H:%M:%S")
     })
 
-    # 增加用户余额
     balances = user_balances.setdefault(user_id, {"usdt": 0, "cny": 0, "trx": 0})
     balances["usdt"] += amount
 
-    # 更新红包消息（带图片）
     receivers_text = "\n".join(
         f"🥇 {r['amount']} USDT💰 ({r['time']}) - {r['user_name']}"
         for r in hongbao["receivers"]
@@ -254,31 +230,26 @@ async def handle_hongbao_receive(update: Update, context: ContextTypes.DEFAULT_T
     )
 
     try:
-        with open("2.jpg", "rb") as photo:
-            if hongbao["remaining_count"] > 0:
-                keyboard = [[InlineKeyboardButton("领取红包", callback_data=f"receive_{hongbao_id}")]]
-                reply_markup = InlineKeyboardMarkup(keyboard)
-                await context.bot.edit_message_media(
-                    inline_message_id=hongbao["inline_message_id"],
-                    media=InputMediaPhoto(media=photo, caption=message_text),
-                    reply_markup=reply_markup
-                )
-            else:
-                keyboard = [[InlineKeyboardButton("点击查看", url="https://t.me/qianbaoo_bot")]]
-                reply_markup = InlineKeyboardMarkup(keyboard)
-                await context.bot.edit_message_media(
-                    inline_message_id=hongbao["inline_message_id"],
-                    media=InputMediaPhoto(media=photo, caption=message_text),
-                    reply_markup=reply_markup
-                )
-    except FileNotFoundError:
-        await context.bot.send_message(chat_id=query.message.chat_id, text="❌ 图片 2.jpg 未找到，无法更新消息！")
-        return
+        if hongbao["remaining_count"] > 0:
+            keyboard = [[InlineKeyboardButton("领取红包", callback_data=f"receive_{hongbao_id}")]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await context.bot.edit_message_text(
+                inline_message_id=hongbao["inline_message_id"],
+                text=message_text,
+                reply_markup=reply_markup
+            )
+        else:
+            keyboard = [[InlineKeyboardButton("点击查看", url="https://t.me/qianbaoo_bot")]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await context.bot.edit_message_text(
+                inline_message_id=hongbao["inline_message_id"],
+                text=message_text,
+                reply_markup=reply_markup
+            )
     except Exception as e:
         await context.bot.send_message(chat_id=query.message.chat_id, text=f"消息更新失败：{str(e)}")
         return
 
-    # 领取成功提示（聊天消息）
     await context.bot.send_message(
         chat_id=query.message.chat_id,
         text=f"您领取了 {amount} USDT！"
@@ -329,10 +300,8 @@ async def handle_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "home" or data == "首页":
         await send_home_message(update, context)
     elif data == "send_voice" or data == "把鸡鸡塞微微逼里看看":
-        # 增加 100 USDT 余额
         balances = user_balances.setdefault(user_id, {"usdt": 0, "cny": 0, "trx": 0})
         balances["usdt"] += 100
-        # 发送语音
         try:
             with open("666.ogg", "rb") as voice:
                 if update.callback_query:
@@ -347,10 +316,8 @@ async def handle_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
             elif update.message:
                 await context.bot.send_message(chat_id=message.chat_id, text="❌ 语音文件 666.ogg 未找到！")
     elif data == "send_voice_youth" or data == "青年大学习":
-        # 增加 100 USDT 余额
         balances = user_balances.setdefault(user_id, {"usdt": 0, "cny": 0, "trx": 0})
         balances["usdt"] += 100
-        # 发送语音
         try:
             with open("111.ogg", "rb") as voice:
                 if update.callback_query:
@@ -365,10 +332,8 @@ async def handle_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
             elif update.message:
                 await context.bot.send_message(chat_id=message.chat_id, text="❌ 语音文件 111.ogg 未找到！")
     elif data == "send_voice_dragon" or data == "巨龙撞击！":
-        # 增加 100 USDT 余额
         balances = user_balances.setdefault(user_id, {"usdt": 0, "cny": 0, "trx": 0})
         balances["usdt"] += 100
-        # 发送语音
         try:
             with open("222.ogg", "rb") as voice:
                 if update.callback_query:
@@ -398,6 +363,14 @@ async def handle_any_message(update: Update, context: ContextTypes.DEFAULT_TYPE)
     else:
         await send_home_message(update, context)
 
+# 启动一个简单的 HTTP 服务器
+def run_http_server():
+    PORT = 8080  # Render 需要监听一个端口，这里用 8080
+    Handler = http.server.SimpleHTTPRequestHandler
+    with socketserver.TCPServer(("", PORT), Handler) as httpd:
+        print(f"HTTP server running on port {PORT}")
+        httpd.serve_forever()
+
 # 主程序
 def main():
     TOKEN = config("BOT_TOKEN")
@@ -409,6 +382,10 @@ def main():
     application.add_handler(CallbackQueryHandler(handle_button))
     application.add_handler(InlineQueryHandler(inlinequery))
     application.add_handler(ChosenInlineResultHandler(chosen_inline_result))
+
+    # 在单独线程中运行 HTTP 服务器
+    http_thread = threading.Thread(target=run_http_server, daemon=True)
+    http_thread.start()
 
     print("钱包机器人启动中...")
     application.run_polling()
