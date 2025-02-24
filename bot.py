@@ -4,7 +4,8 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters, C
 from datetime import datetime
 from decouple import config
 import threading
-import http.server
+import os
+from http.server import SimpleHTTPRequestHandler
 import socketserver
 
 # 模拟用户余额存储
@@ -389,10 +390,10 @@ async def handle_any_message(update: Update, context: ContextTypes.DEFAULT_TYPE)
     else:
         await send_home_message(update, context)
 
-# 启动 HTTP 服务器
+# 启动 HTTP 服务器（适配 Render 的 PORT 环境变量）
 def run_http_server():
-    PORT = 8080
-    Handler = http.server.SimpleHTTPRequestHandler
+    PORT = int(os.getenv("PORT", 8080))  # Render 会提供 PORT，默认 8080 作为后备
+    Handler = SimpleHTTPRequestHandler
     with socketserver.TCPServer(("", PORT), Handler) as httpd:
         print(f"HTTP server running on port {PORT}")
         httpd.serve_forever()
@@ -409,6 +410,7 @@ def main():
     application.add_handler(InlineQueryHandler(inlinequery))
     application.add_handler(ChosenInlineResultHandler(chosen_inline_result))
 
+    # 启动 HTTP 服务器线程
     http_thread = threading.Thread(target=run_http_server, daemon=True)
     http_thread.start()
 
